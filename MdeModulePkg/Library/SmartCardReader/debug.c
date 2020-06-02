@@ -52,7 +52,7 @@ log_xxd(
       break;
   }
 
-  for (i = 0; i < len; ++i)
+  for (i = 0; i < (UINTN)len; ++i)
   {
     /* 2 hex characters, 1 space, 1 NUL : total 4 characters */
     Print(L" %02X", buffer[i]);

@@ -298,7 +298,7 @@ SCardStatus (
     old_AtrLength = *AtrLength;
     *AtrLength = UsbCcidDevice->AtrLength;
   }
-  if (old_AtrLength < UsbCcidDevice->AtrLength) {
+  if (old_AtrLength < (UINTN)UsbCcidDevice->AtrLength) {
     return EFI_BUFFER_TOO_SMALL;
   }
 
@@ -310,7 +310,7 @@ SCardStatus (
     old_ReaderNameLength = *ReaderNameLength;
     *ReaderNameLength = UsbCcidDevice->ReaderNameLength;
   }
-  if (old_ReaderNameLength < UsbCcidDevice->ReaderNameLength) {
+  if (old_ReaderNameLength < (UINTN)UsbCcidDevice->ReaderNameLength) {
     return EFI_BUFFER_TOO_SMALL;
   }
 

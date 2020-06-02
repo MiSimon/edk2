@@ -329,7 +329,7 @@ InitializeUsbCcidDevice (
   CHAR16 *ProductString = NULL;
   UINT16 *LangIDTable;
   UINT16 TableSize;
-  INTN Index;
+  UINTN Index;
   CHAR16 TxtLun[10];
   INTN reader_index;
   CcidDesc *ccid_slot;
@@ -602,7 +602,7 @@ SmartCardReaderDriverBindingStart (
     get_ccid_slot(new_reader_index)->readerName = new_UsbCcidDevice->ReaderName;
 
     /* Set the slot number ta the lower level */
-    get_ccid_descriptor(new_reader_index)->bCurrentSlotIndex = slot;
+    get_ccid_descriptor(new_reader_index)->bCurrentSlotIndex = (char)slot;
 
     /* New Lun for a new slot */
     Lun++;
