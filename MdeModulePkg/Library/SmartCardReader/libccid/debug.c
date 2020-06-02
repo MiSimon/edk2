@@ -29,11 +29,11 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/time.h>
 #include <stdlib.h>
-
+#if 0
+#include <sys/time.h>
 #include "strlcpycat.h"
-
+#endif
 #undef LOG_TO_STDERR
 
 #ifdef LOG_TO_STDERR
@@ -44,6 +44,7 @@
 
 void log_msg(const int priority, const char *fmt, ...)
 {
+	#if 0
 	char debug_buffer[160]; /* up to 2 lines of 80 characters */
 	va_list argptr;
 	static struct timeval last_time = { 0, 0 };
@@ -131,11 +132,13 @@ void log_msg(const int priority, const char *fmt, ...)
 	(void)fprintf(LOG_STREAM, "%s%.8d%s %s%s%s\n", time_pfx, delta, time_sfx,
 		color_pfx, debug_buffer, color_sfx);
 	fflush(LOG_STREAM);
+	#endif
 } /* log_msg */
 
 void log_xxd(const int priority, const char *msg, const unsigned char *buffer,
 	const int len)
 {
+	#if 0
 	int i;
 	char *c, debug_buffer[len*3 + strlen(msg) +1];
 	size_t l;
@@ -154,4 +157,5 @@ void log_xxd(const int priority, const char *msg, const unsigned char *buffer,
 
 	(void)fprintf(LOG_STREAM, "%s\n", debug_buffer);
 	fflush(LOG_STREAM);
+	#endif
 } /* log_xxd */

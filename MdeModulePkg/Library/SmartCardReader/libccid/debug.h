@@ -41,7 +41,7 @@
 
 /* You can't do #ifndef __FUNCTION__ */
 #if !defined(__GNUC__) && !defined(__IBMC__)
-#define __FUNCTION__ ""
+//#define __FUNCTION__ ""
 #endif
 
 extern int LogLevel;

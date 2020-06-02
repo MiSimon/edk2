@@ -101,7 +101,7 @@ static _usbDevice usbDevice[CCID_DRIVER_MAX_READERS];
 status_t OpenUEFI(unsigned int reader_index, DWORD Channel)
 {
 	int return_value = STATUS_UNSUCCESSFUL;
-	USB_CCID_DEV *UsbCcidDevice = (USB_CCID_DEV *)Channel;
+	USB_CCID_DEV *UsbCcidDevice = (USB_CCID_DEV *)(UINTN)Channel;
 	int index;
 	UINT8                       EndpointNumber;
 	EFI_USB_ENDPOINT_DESCRIPTOR EndpointDescriptor;
@@ -375,8 +375,29 @@ read_again:
 int ControlUSB(int reader_index, int requesttype, int request, int value,
     unsigned char *bytes, unsigned int size)
 {
-	Print(L"ControlUEFI not implemented\n");
-	return STATUS_COMM_ERROR;
+	_usbDevice current_usb_device = usbDevice[reader_index];
+	USB_DEVICE_REQUEST usb_request;
+	int status;
+
+	usb_request.RequestType = requesttype;
+	usb_request.Request = request;
+	usb_request.Value = value;
+	usb_request.Index = 0;
+	usb_request.Length = size;
+
+	if (current_usb_device.UsbIo->UsbControlTransfer(
+			current_usb_device.UsbIo,
+			&usb_request,
+			size == 0 ? EfiUsbNoData : EfiUsbDataIn,
+			500,
+			bytes,
+			size,
+			&status) != EFI_SUCCESS)
+	{
+		return STATUS_COMM_ERROR;
+	}
+
+	return status;
 } /* ControlUSB */
 
 

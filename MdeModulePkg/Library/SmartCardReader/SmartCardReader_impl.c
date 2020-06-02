@@ -39,7 +39,14 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "defs.h"
 
 #define CheckThis if (NULL == This) return EFI_INVALID_PARAMETER
-
+int _fltused = 1;
+#pragma function(memset)
+void *memset(void *buffer, UINT8 value, UINTN size)
+{
+  gBS->SetMem(buffer, size, value);
+  return buffer;
+}
+void __chkstk() {}
 static
 void
 update_state(

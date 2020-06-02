@@ -1153,12 +1153,11 @@ EXTERNAL RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 		return IFD_COMMUNICATION_ERROR;
 
 #ifdef UEFI_DRIVER
-	DEBUG_INFO4("action: %a, %s (lun: " DWORD_X ")",
+	DEBUG_INFO4("action: %a, %s (lun: " DWORD_X ")", actions[Action - IFD_POWER_UP], CcidSlots[reader_index].readerName, Lun);
 #else
-	DEBUG_INFO4("action: %s, %s (lun: " DWORD_X ")",
+	DEBUG_INFO4("action: %s, %s (lun: " DWORD_X ")", actions[Action - IFD_POWER_UP], CcidSlots[reader_index].readerName, Lun);
 #endif
-		actions[Action-IFD_POWER_UP], CcidSlots[reader_index].readerName, Lun);
-
+		
 	switch (Action)
 	{
 		case IFD_POWER_DOWN:

@@ -304,13 +304,15 @@ RESPONSECODE SecurePINVerify(unsigned int reader_index,
 	unsigned char TxBuffer[], unsigned int TxLength,
 	unsigned char RxBuffer[], unsigned int *RxLength)
 {
-	unsigned char cmd[11+14+TxLength];
+	unsigned char *cmd;
 	unsigned int a, b;
 	PIN_VERIFY_STRUCTURE *pvs;
 	_ccid_descriptor *ccid_descriptor = get_ccid_descriptor(reader_index);
 	int old_read_timeout;
 	RESPONSECODE ret;
 	status_t res;
+
+	cmd = malloc(11 + 14 + TxLength);
 
 	pvs = (PIN_VERIFY_STRUCTURE *)TxBuffer;
 	cmd[0] = 0x69;	/* Secure */
@@ -323,7 +325,9 @@ RESPONSECODE SecurePINVerify(unsigned int reader_index,
 
 	if (TxLength < 19+4 /* 4 = APDU size */)	/* command too short? */
 	{
-		DEBUG_INFO3("Command too short: %d < %d", TxLength, 19+4);
+		DEBUG_INFO3("Command too short: %d < %d", TxLength, 19 + 4);
+		if (cmd)
+			free(cmd);
 		return IFD_NOT_SUPPORTED;
 	}
 
@@ -344,6 +348,8 @@ RESPONSECODE SecurePINVerify(unsigned int reader_index,
 	if (dw2i(TxBuffer, 15) + 19 != TxLength) /* ulDataLength field coherency */
 	{
 		DEBUG_INFO3("Wrong lengths: %d %d", dw2i(TxBuffer, 15) + 19, TxLength);
+		if (cmd)
+			free(cmd);
 		return IFD_NOT_SUPPORTED;
 	}
 
@@ -562,14 +568,21 @@ RESPONSECODE SecurePINVerify(unsigned int reader_index,
 					&tbuf, NULL);
 
 				ret = CCID_Transmit(t1 -> lun, slen, RxBuffer, 0, t1->wtx);
-				if (ret != IFD_SUCCESS)
+				if (ret != IFD_SUCCESS) {
+					if (cmd)
+						free(cmd);
 					return ret;
+				}
 
 				/* I guess we have at least 6 bytes in RxBuffer */
 				*RxLength = 6;
 				ret = CCID_Receive(reader_index, RxLength, RxBuffer, NULL);
 				if (ret != IFD_SUCCESS)
+				{
+					if (cmd)
+						free(cmd);
 					return ret;
+				}
 
 				/* Restore initial timeout */
 				ccid_descriptor->readTimeout = oldReadTimeout;
@@ -582,7 +595,9 @@ RESPONSECODE SecurePINVerify(unsigned int reader_index,
 	}
 
 end:
-	ccid_descriptor -> readTimeout = old_read_timeout;
+	ccid_descriptor->readTimeout = old_read_timeout;
+	if (cmd)
+		free(cmd);
 	return ret;
 } /* SecurePINVerify */
 
@@ -634,7 +649,7 @@ RESPONSECODE SecurePINModify(unsigned int reader_index,
 	unsigned char TxBuffer[], unsigned int TxLength,
 	unsigned char RxBuffer[], unsigned int *RxLength)
 {
-	unsigned char cmd[11+19+TxLength];
+	unsigned char *cmd;
 	unsigned int a, b;
 	PIN_MODIFY_STRUCTURE *pms;
 	_ccid_descriptor *ccid_descriptor = get_ccid_descriptor(reader_index);
@@ -645,6 +660,8 @@ RESPONSECODE SecurePINModify(unsigned int reader_index,
 	int bNumberMessage = 0; /* for GemPC Pinpad */
 	int gemalto_modify_pin_bug;
 #endif
+
+	cmd = malloc(11 + 19 + TxLength);
 
 	pms = (PIN_MODIFY_STRUCTURE *)TxBuffer;
 	cmd[0] = 0x69;	/* Secure */
@@ -657,7 +674,9 @@ RESPONSECODE SecurePINModify(unsigned int reader_index,
 
 	if (TxLength < 24+4 /* 4 = APDU size */) /* command too short? */
 	{
-		DEBUG_INFO3("Command too short: %d < %d", TxLength, 24+4);
+		DEBUG_INFO3("Command too short: %d < %d", TxLength, 24 + 4);
+		if (cmd)
+			free(cmd);
 		return IFD_NOT_SUPPORTED;
 	}
 
@@ -679,6 +698,8 @@ RESPONSECODE SecurePINModify(unsigned int reader_index,
 	if (dw2i(TxBuffer, 20) + 24 != TxLength) /* ulDataLength field coherency */
 	{
 		DEBUG_INFO3("Wrong lengths: %d %d", dw2i(TxBuffer, 20) + 24, TxLength);
+		if (cmd)
+			free(cmd);
 		return IFD_NOT_SUPPORTED;
 	}
 
@@ -687,6 +708,8 @@ RESPONSECODE SecurePINModify(unsigned int reader_index,
 	if ((TxBuffer[11] > 3) && (TxBuffer[11] != 0xFF))
 	{
 		DEBUG_INFO2("Wrong bNumberMessage: %d", TxBuffer[11]);
+		if (cmd)
+			free(cmd);
 		return IFD_NOT_SUPPORTED;
 	}
 
@@ -870,7 +893,9 @@ RESPONSECODE SecurePINModify(unsigned int reader_index,
 	}
 
 end:
-	ccid_descriptor -> readTimeout = old_read_timeout;
+	ccid_descriptor->readTimeout = old_read_timeout;
+	if (cmd)
+		free(cmd);
 	return ret;
 } /* SecurePINModify */
 
@@ -1271,7 +1296,7 @@ RESPONSECODE CmdXfrBlock(unsigned int reader_index, unsigned int tx_length,
 RESPONSECODE CCID_Transmit(unsigned int reader_index, unsigned int tx_length,
 	const unsigned char tx_buffer[], unsigned short rx_length, unsigned char bBWI)
 {
-	unsigned char cmd[10+tx_length];	/* CCID + APDU buffer */
+	unsigned char *cmd;	/* CCID + APDU buffer */
 	_ccid_descriptor *ccid_descriptor = get_ccid_descriptor(reader_index);
 	status_t ret;
 
@@ -1318,7 +1343,9 @@ RESPONSECODE CCID_Transmit(unsigned int reader_index, unsigned int tx_length,
 	}
 #endif
 
-	cmd[0] = 0x6F; /* XfrBlock */
+	cmd = malloc(10 + tx_length);
+
+	cmd[0] = 0x6F;		/* XfrBlock */
 	i2dw(tx_length, cmd+1);	/* APDU length */
 	cmd[5] = ccid_descriptor->bCurrentSlotIndex;	/* slot number */
 	cmd[6] = (*ccid_descriptor->pbSeq)++;
@@ -1331,6 +1358,8 @@ RESPONSECODE CCID_Transmit(unsigned int reader_index, unsigned int tx_length,
 	ret = WritePort(reader_index, 10+tx_length, cmd);
 	CHECK_STATUS(ret)
 
+	if(cmd)
+		free(cmd);
 	return IFD_SUCCESS;
 } /* CCID_Transmit */
 
@@ -2213,13 +2242,15 @@ static RESPONSECODE CmdXfrBlockTPDU_T1(unsigned int reader_index,
 RESPONSECODE SetParameters(unsigned int reader_index, char protocol,
 	unsigned int length, unsigned char buffer[])
 {
-	unsigned char cmd[10+length];	/* CCID + APDU buffer */
+	unsigned char *cmd;	/* CCID + APDU buffer */
 	_ccid_descriptor *ccid_descriptor = get_ccid_descriptor(reader_index);
 	status_t res;
 
 	DEBUG_COMM2("length: %d bytes", length);
 
-	cmd[0] = 0x61; /* SetParameters */
+	cmd = malloc(10 + length);
+
+	cmd[0] = 0x61;		/* SetParameters */
 	i2dw(length, cmd+1);	/* APDU length */
 	cmd[5] = ccid_descriptor->bCurrentSlotIndex;	/* slot number */
 	cmd[6] = (*ccid_descriptor->pbSeq)++;
@@ -2231,13 +2262,15 @@ RESPONSECODE SetParameters(unsigned int reader_index, char protocol,
 	res = WritePort(reader_index, 10+length, cmd);
 	CHECK_STATUS(res)
 
-	length = sizeof(cmd);
+	length = 10 + length;
 	res = ReadPort(reader_index, &length, cmd);
 	CHECK_STATUS(res)
 
 	if (length < STATUS_OFFSET+1)
 	{
 		DEBUG_CRITICAL2("Not enough data received: %d bytes", length);
+		if (cmd)
+			free(cmd);
 		return IFD_COMMUNICATION_ERROR;
 	}
 
@@ -2247,13 +2280,21 @@ RESPONSECODE SetParameters(unsigned int reader_index, char protocol,
 		if (0x00 == cmd[ERROR_OFFSET])	/* command not supported */
 			return IFD_NOT_SUPPORTED;
 		else
-			if ((cmd[ERROR_OFFSET] >= 1) && (cmd[ERROR_OFFSET] <= 127))
+			if ((cmd[ERROR_OFFSET] >= 1) && (cmd[ERROR_OFFSET] <= 127)) {
+				if (cmd)
+					free(cmd);
 				/* a parameter is not changeable */
 				return IFD_SUCCESS;
+			}
 			else
+			{
+				if (cmd)
+					free(cmd);
 				return IFD_COMMUNICATION_ERROR;
+			}
 	}
-
+	if (cmd)
+		free(cmd);
 	return IFD_SUCCESS;
 } /* SetParameters */
 

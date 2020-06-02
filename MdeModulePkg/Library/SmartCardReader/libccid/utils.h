@@ -28,6 +28,6 @@
 
 void InitReaderIndex(void);
 int GetNewReaderIndex(const int Lun);
-int LunToReaderIndex(int Lun);
+int LunToReaderIndex(const int Lun);
 void ReleaseReaderIndex(const int idx);
 

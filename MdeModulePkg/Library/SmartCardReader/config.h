@@ -41,6 +41,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #define MAX_BUFFER_SIZE_EXTENDED    (4 + 3 + (1<<16) + 3 + 2)   /**< enhanced (64K + APDU + Lc + Le + SW) Tx/Rx Buffer */
 
+#include <Uefi.h>
 #include <Library/BaseMemoryLib.h>
 #include <Library/MemoryAllocationLib.h>
 
@@ -50,7 +51,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #define malloc(a) AllocateZeroPool(a)
 #define memcpy CopyMem
 #define memmove CopyMem
-#define memset(buffer, value, length) SetMem(buffer, length, value)
+//#define memset(buffer, value, length) SetMem(buffer, length, value)
 #define sleep(a) a
 #define strncmp(s1, s2, n) -1
 #define strerror(a) ""
@@ -62,3 +63,5 @@ POSSIBILITY OF SUCH DAMAGE.
 #define errno -1
 #define htonl(a) (a)
 
+void *memset(void *, UINT8, UINTN);
+#pragma intrinsic(memset)
