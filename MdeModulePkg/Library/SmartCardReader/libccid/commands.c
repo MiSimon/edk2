@@ -913,7 +913,7 @@ RESPONSECODE CmdEscape(unsigned int reader_index,
 	status_t res;
 	unsigned int length_in, length_out;
 	RESPONSECODE return_value = IFD_SUCCESS;
-	int old_read_timeout;
+	int old_read_timeout = 0;
 	_ccid_descriptor *ccid_descriptor = get_ccid_descriptor(reader_index);
 
 	/* a value of 0 do not change the default read timeout */
