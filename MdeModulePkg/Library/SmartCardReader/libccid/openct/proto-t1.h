@@ -17,8 +17,6 @@
 	Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
-/* $Id: proto-t1.h 6975 2014-09-04 11:33:05Z rousseau $ */
-
 #ifndef __PROTO_T1_H__
 #define __PROTO_T1_H__
 

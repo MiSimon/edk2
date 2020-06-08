@@ -17,10 +17,6 @@
 	Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
-/*
- * $Id: ccid.c 6976 2014-09-04 11:35:46Z rousseau $
- */
-
 #include <config.h>
 
 #ifdef HAVE_STDIO_H
@@ -84,8 +80,25 @@ int ccid_open_hack_pre(unsigned int reader_index)
 			}
 			break;
 
+		case OZ776:
 		case OZ776_7772:
 			ccid_descriptor->dwMaxDataRate = 9600;
+			break;
+
+		case ElatecTWN4_CCID_CDC:
+		case ElatecTWN4_CCID:
+			/* Use a timeout of 1000 ms instead of 100 ms in
+			 * CmdGetSlotStatus() used by CreateChannelByNameOrChannel()
+			 * The reader answers after up to 1 s if no tag is present */
+			ccid_descriptor->readTimeout = DEFAULT_COM_READ_TIMEOUT * 10;
+			break;
+
+		case SCM_SCL011:
+		case IDENTIV_uTrust3700F:
+		case IDENTIV_uTrust3701F:
+		case IDENTIV_uTrust4701F:
+			/* The SCM SCL011 reader needs 350 ms to answer */
+			ccid_descriptor->readTimeout = DEFAULT_COM_READ_TIMEOUT * 4;
 			break;
 	}
 
@@ -107,7 +120,7 @@ int ccid_open_hack_pre(unsigned int reader_index)
 
 		DEBUG_COMM("ICCD type A");
 		(void)CmdPowerOff(reader_index);
-		(void)CmdPowerOn(reader_index, &n, tmp, CCID_CLASS_AUTO_VOLTAGE);
+		(void)CmdPowerOn(reader_index, &n, tmp, VOLTAGE_AUTO);
 		(void)CmdPowerOff(reader_index);
 	}
 
@@ -127,7 +140,7 @@ int ccid_open_hack_pre(unsigned int reader_index)
 		}
 
 		(void)CmdPowerOff(reader_index);
-		(void)CmdPowerOn(reader_index, &n, tmp, CCID_CLASS_AUTO_VOLTAGE);
+		(void)CmdPowerOn(reader_index, &n, tmp, VOLTAGE_AUTO);
 		(void)CmdPowerOff(reader_index);
 	}
 
@@ -212,8 +225,8 @@ static void set_gemalto_firmware_features(unsigned int reader_index)
 		unsigned int len_features = sizeof *gf_features;
 		RESPONSECODE ret;
 
-		ret = CmdEscape(reader_index, cmd, sizeof cmd,
-			(unsigned char*)gf_features, &len_features, 0);
+		ret = CmdEscapeCheck(reader_index, cmd, sizeof cmd,
+			(unsigned char*)gf_features, &len_features, 0, TRUE);
 		if ((IFD_SUCCESS == ret) &&
 		    (len_features == sizeof *gf_features))
 		{
@@ -457,7 +470,7 @@ int ccid_open_hack_post(unsigned int reader_index)
 					length_res = sizeof(res);
 					if (IFD_SUCCESS == CmdEscape(reader_index, cmd2, sizeof(cmd2), res, &length_res, DEFAULT_COM_READ_TIMEOUT))
 					{
-						DEBUG_COMM("Disable SPE retry counter successfull");
+						DEBUG_COMM("Disable SPE retry counter successful");
 					}
 					else
 					{
@@ -470,10 +483,28 @@ int ccid_open_hack_post(unsigned int reader_index)
 		case HPSMARTCARDKEYBOARD:
 		case HP_CCIDSMARTCARDKEYBOARD:
 		case FUJITSUSMARTKEYB:
+		case CHICONYHPSKYLABKEYBOARD:
 			/* the Secure Pin Entry is bogus so disable it
-			 * http://martinpaljak.net/2011/03/19/insecure-hp-usb-smart-card-keyboard/
+			 * https://web.archive.org/web/20120320001756/http://martinpaljak.net/2011/03/19/insecure-hp-usb-smart-card-keyboard/
+			 *
+			 * The problem is that the PIN code entered using the Secure
+			 * Pin Entry function is also sent to the host.
 			 */
+
+		case C3PO_LTC31_v2:
 			ccid_descriptor->bPINSupport = 0;
+			break;
+
+		case HID_AVIATOR:      /* OMNIKEY Generic */
+		case HID_OMNIKEY_3X21: /* OMNIKEY 3121 or 3021 or 1021 */
+		case HID_OMNIKEY_6121: /* OMNIKEY 6121 */
+		case CHERRY_XX44:      /* Cherry Smart Terminal xx44 */
+		case FUJITSU_D323:     /* Fujitsu Smartcard Reader D323 */
+			/* The chip advertises pinpad but actually doesn't have one */
+			ccid_descriptor->bPINSupport = 0;
+			/* Firmware uses chaining */
+			ccid_descriptor->dwFeatures &= ~CCID_CLASS_EXCHANGE_MASK;
+			ccid_descriptor->dwFeatures |= CCID_CLASS_EXTENDED_APDU;
 			break;
 
 #if 0
@@ -514,6 +545,27 @@ int ccid_open_hack_post(unsigned int reader_index)
 			}
 			break;
 #endif
+		case CHERRY_KC1000SC:
+			if ((0x0100 == ccid_descriptor->IFD_bcdDevice)
+				&& (ccid_descriptor->dwFeatures & CCID_CLASS_EXCHANGE_MASK) == CCID_CLASS_SHORT_APDU)
+			{
+				/* firmware 1.00 is bogus
+				 * With a T=1 card and case 2 APDU (data from card to
+				 * host) the maximum size returned by the reader is 128
+				 * byes. The reader is then using chaining as with
+				 * extended APDU.
+				 */
+				ccid_descriptor->dwFeatures &= ~CCID_CLASS_EXCHANGE_MASK;
+				ccid_descriptor->dwFeatures |= CCID_CLASS_EXTENDED_APDU;
+			}
+			break;
+
+		case ElatecTWN4_CCID_CDC:
+		case ElatecTWN4_CCID:
+		case SCM_SCL011:
+			/* restore default timeout (modified in ccid_open_hack_pre()) */
+			ccid_descriptor->readTimeout = DEFAULT_COM_READ_TIMEOUT;
+			break;
 	}
 
 	/* Gemalto readers may report additional information */
@@ -528,7 +580,8 @@ int ccid_open_hack_post(unsigned int reader_index)
  *					ccid_error
  *
  ****************************************************************************/
-void ccid_error(int error, const char *file, int line, const char *function)
+void ccid_error(int log_level, int error, const char *file, int line,
+	const char *function)
 {
 #ifndef NO_LOG
 	const char *text;
@@ -648,11 +701,10 @@ void ccid_error(int error, const char *file, int line, const char *function)
 
 			text = var_text;
 			break;
-	}
+		}
 #ifndef UEFI_DRIVER
-	log_msg(PCSC_LOG_ERROR, "%s:%d:%s %s", file, line, function, text);
+		log_msg(log_level, "%s:%d:%s %s", file, line, function, text);
 #endif
-
 #endif
 
 } /* ccid_error */

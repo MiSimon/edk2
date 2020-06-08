@@ -46,7 +46,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef __pcsclite_h__
 #define __pcsclite_h__
 
-#include <wintypes.h>
+#include "wintypes.h"
 
 #ifdef __cplusplus
 extern "C"

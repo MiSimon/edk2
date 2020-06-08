@@ -46,7 +46,7 @@
  * Type definitions
  */
 
-#include <wintypes.h>
+#include "wintypes.h"
 
 #ifndef __cplusplus
 typedef int                bool;

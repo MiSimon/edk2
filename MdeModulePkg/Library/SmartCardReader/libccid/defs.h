@@ -17,9 +17,7 @@
 	Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
-/*
- * $Id: defs.h 6926 2014-06-17 09:22:00Z rousseau $
- */
+#define max( a, b )   ( ( ( a ) > ( b ) ) ? ( a ) : ( b ) )
 
 #include <pcsclite.h>
 
@@ -72,7 +70,6 @@ typedef enum {
 
 /* Communication buffer size (max=adpu+Lc+data+Le)
  * we use a 64kB for extended APDU on APDU mode readers */
-//#define CMD_BUF_SIZE (4 +3 +64*1024 +3)
 #define CMD_BUF_SIZE (4 +3 +32*1024 +3)
 
 /* Protocols */
@@ -113,7 +110,6 @@ typedef enum {
 #define ReadPort ReadUEFI
 #define WritePort WriteUEFI
 #include "ccid_uefi.h"
-
 #else
 
 #define OpenPortByName OpenUSBByName

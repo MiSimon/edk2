@@ -16,12 +16,7 @@
 	along with this library; if not, write to the Free Software Foundation,
 	Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
-
 /*
- * $Id: debug.c 6975 2014-09-04 11:33:05Z rousseau $
- */
-
-
 #include <config.h>
 #include "misc.h"
 #include "debug.h"
@@ -29,11 +24,15 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
-#if 0
 #include <sys/time.h>
-#include "strlcpycat.h"
+#include <stdlib.h>
+
+#ifdef USE_SYSLOG
+#include <syslog.h>
 #endif
+
+#include "strlcpycat.h"
+*/
 #undef LOG_TO_STDERR
 
 #ifdef LOG_TO_STDERR
@@ -44,13 +43,31 @@
 
 void log_msg(const int priority, const char *fmt, ...)
 {
-	#if 0
-	char debug_buffer[160]; /* up to 2 lines of 80 characters */
+#if 0
+	char debug_buffer[3 * 80]; /* up to 3 lines of 80 characters */
 	va_list argptr;
 	static struct timeval last_time = { 0, 0 };
 	struct timeval new_time = { 0, 0 };
 	struct timeval tmp;
 	int delta;
+#ifdef USE_SYSLOG
+	int syslog_level;
+
+	switch(priority)
+	{
+		case PCSC_LOG_CRITICAL:
+			syslog_level = LOG_CRIT;
+			break;
+		case PCSC_LOG_ERROR:
+			syslog_level = LOG_ERR;
+			break;
+		case PCSC_LOG_INFO:
+			syslog_level = LOG_INFO;
+			break;
+		default:
+			syslog_level = LOG_DEBUG;
+	}
+#else
 	const char *color_pfx = "", *color_sfx = "";
 	const char *time_pfx = "", *time_sfx = "";
 	static int initialized = 0;
@@ -106,6 +123,7 @@ void log_msg(const int priority, const char *fmt, ...)
 				break;
 		}
 	}
+#endif
 
 	gettimeofday(&new_time, NULL);
 	if (0 == last_time.tv_sec)
@@ -129,10 +147,14 @@ void log_msg(const int priority, const char *fmt, ...)
 	(void)vsnprintf(debug_buffer, sizeof debug_buffer, fmt, argptr);
 	va_end(argptr);
 
+#ifdef USE_SYSLOG
+	syslog(syslog_level, "%.8d %s", delta, debug_buffer);
+#else
 	(void)fprintf(LOG_STREAM, "%s%.8d%s %s%s%s\n", time_pfx, delta, time_sfx,
 		color_pfx, debug_buffer, color_sfx);
 	fflush(LOG_STREAM);
-	#endif
+#endif
+#endif
 } /* log_msg */
 
 void log_xxd(const int priority, const char *msg, const unsigned char *buffer,
@@ -155,7 +177,11 @@ void log_xxd(const int priority, const char *msg, const unsigned char *buffer,
 		c += 3;
 	}
 
+#ifdef USE_SYSLOG
+	syslog(LOG_DEBUG, "%s", debug_buffer);
+#else
 	(void)fprintf(LOG_STREAM, "%s\n", debug_buffer);
 	fflush(LOG_STREAM);
-	#endif
+#endif
+#endif
 } /* log_xxd */

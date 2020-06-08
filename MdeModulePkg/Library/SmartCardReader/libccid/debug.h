@@ -18,10 +18,6 @@
 */
 
 /*
- * $Id: debug.h 6967 2014-09-02 13:50:50Z rousseau $
- */
-
-/*
  * DEBUG_CRITICAL("text");
  *	log "text" if (LogLevel & DEBUG_LEVEL_CRITICAL) is TRUE
  *
@@ -40,8 +36,8 @@
 #define  _GCDEBUG_H_
 
 /* You can't do #ifndef __FUNCTION__ */
-#if !defined(__GNUC__) && !defined(__IBMC__)
-//#define __FUNCTION__ ""
+#if !defined(__GNUC__) && !defined(__IBMC__) && !defined(_MSC_VER)
+#define __FUNCTION__ ""
 #endif
 
 extern int LogLevel;

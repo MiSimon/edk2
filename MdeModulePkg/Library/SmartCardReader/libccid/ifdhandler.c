@@ -17,8 +17,6 @@
 	Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
-/* $Id: ifdhandler.c 6977 2014-09-04 11:36:54Z rousseau $ */
-
 #include <config.h>
 
 #ifdef HAVE_STDIO_H
@@ -72,12 +70,11 @@ static pthread_mutex_t ifdh_context_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int LogLevel = DEBUG_LEVEL_CRITICAL | DEBUG_LEVEL_INFO;
 int DriverOptions = 0;
-int PowerOnVoltage = VOLTAGE_5V;
+int PowerOnVoltage = -1;
 static int DebugInitialized = FALSE;
 
 /* local functions */
 static void init_driver(void);
-static void extra_egt(ATR_t *atr, _ccid_descriptor *ccid_desc, DWORD Protocol);
 static char find_baud_rate(unsigned int baudrate, unsigned int *list);
 static unsigned int T0_card_timeout(double f, double d, int TC1, int TC2,
 	int clock_frequency);
@@ -85,6 +82,23 @@ static unsigned int T1_card_timeout(double f, double d, int TC1, int BWI,
 	int CWI, int clock_frequency);
 static int get_IFSC(ATR_t *atr, int *i);
 
+static void FreeChannel(int reader_index)
+{
+#ifdef HAVE_PTHREAD
+	(void)pthread_mutex_lock(&ifdh_context_mutex);
+#endif
+
+	(void)ClosePort(reader_index);
+
+	free(CcidSlots[reader_index].readerName);
+	memset(&CcidSlots[reader_index], 0, sizeof(CcidSlots[reader_index]));
+
+	ReleaseReaderIndex(reader_index);
+
+#ifdef HAVE_PTHREAD
+	(void)pthread_mutex_unlock(&ifdh_context_mutex);
+#endif
+}
 
 static RESPONSECODE CreateChannelByNameOrChannel(DWORD Lun,
 	LPSTR lpcDevice, DWORD Channel)
@@ -105,7 +119,17 @@ static RESPONSECODE CreateChannelByNameOrChannel(DWORD Lun,
 		DEBUG_INFO3("Lun: " DWORD_X ", Channel: " DWORD_X, Lun, Channel);
 	}
 
-	if (-1 == (reader_index = GetNewReaderIndex(Lun)))
+#ifdef HAVE_PTHREAD
+	(void)pthread_mutex_lock(&ifdh_context_mutex);
+#endif
+
+	reader_index = GetNewReaderIndex(Lun);
+
+#ifdef HAVE_PTHREAD
+	(void)pthread_mutex_unlock(&ifdh_context_mutex);
+#endif
+
+	if (-1 == reader_index)
 		return IFD_COMMUNICATION_ERROR;
 
 	/* Reset ATR buffer */
@@ -117,16 +141,12 @@ static RESPONSECODE CreateChannelByNameOrChannel(DWORD Lun,
 
 	/* reader name */
 #ifdef UEFI_DRIVER
-		CcidSlots[reader_index].readerName = NULL;
+	CcidSlots[reader_index].readerName = NULL;
 #else
 	if (lpcDevice)
 		CcidSlots[reader_index].readerName = strdup(lpcDevice);
 	else
 		CcidSlots[reader_index].readerName = strdup("no name");
-#endif
-
-#ifdef HAVE_PTHREAD
-	(void)pthread_mutex_lock(&ifdh_context_mutex);
 #endif
 
 	if (lpcDevice)
@@ -172,7 +192,10 @@ static RESPONSECODE CreateChannelByNameOrChannel(DWORD Lun,
 		oldReadTimeout = ccid_descriptor->readTimeout;
 
 		/* 100 ms just to resync the USB toggle bits */
-		ccid_descriptor->readTimeout = 100;
+		/* Do not use a fixed 100 ms value but compute it from the
+		 * default timeout. It is now possible to use a different value
+		 * by changing readTimeout in ccid_open_hack_pre() */
+		ccid_descriptor->readTimeout = ccid_descriptor->readTimeout * 100.0 / DEFAULT_COM_READ_TIMEOUT;
 
 		if ((IFD_COMMUNICATION_ERROR == CmdGetSlotStatus(reader_index, pcbuffer))
 			&& (IFD_COMMUNICATION_ERROR == CmdGetSlotStatus(reader_index, pcbuffer)))
@@ -195,17 +218,10 @@ static RESPONSECODE CreateChannelByNameOrChannel(DWORD Lun,
 	}
 
 error:
-#ifdef HAVE_PTHREAD
-	(void)pthread_mutex_unlock(&ifdh_context_mutex);
-#endif
-
 	if (return_value != IFD_SUCCESS)
 	{
 		/* release the allocated resources */
-#ifndef UEFI_DRIVER
-		free(CcidSlots[reader_index].readerName);
-#endif
-		ReleaseReaderIndex(reader_index);
+		FreeChannel(reader_index);
 	}
 
 	return return_value;
@@ -283,25 +299,10 @@ EXTERNAL RESPONSECODE IFDHCloseChannel(DWORD Lun)
 	(void)CmdPowerOff(reader_index);
 	/* No reader status check, if it failed, what can you do ? :) */
 
-#ifdef HAVE_PTHREAD
-	(void)pthread_mutex_lock(&ifdh_context_mutex);
-#endif
-
-	(void)ClosePort(reader_index);
-	ReleaseReaderIndex(reader_index);
-
-#ifndef UEFI_DRIVER
-	free(CcidSlots[reader_index].readerName);
-#endif
-	memset(&CcidSlots[reader_index], 0, sizeof(CcidSlots[reader_index]));
-
-#ifdef HAVE_PTHREAD
-	(void)pthread_mutex_unlock(&ifdh_context_mutex);
-#endif
+	FreeChannel(reader_index);
 
 	return IFD_SUCCESS;
 } /* IFDHCloseChannel */
-
 
 #if !defined(TWIN_SERIAL) && !defined(UEFI_DRIVER)
 static RESPONSECODE IFDHPolling(DWORD Lun, int timeout)
@@ -338,7 +339,7 @@ static RESPONSECODE IFDHSleep(DWORD Lun, int timeout)
 	 * TAG_IFD_POLLING_THREAD_KILLABLE then we could use a much longer delay
 	 * and be killed before pcscd exits
 	 */
-	(void)usleep(timeout);
+	(void)usleep(timeout * 1000);
 	return IFD_SUCCESS;
 }
 
@@ -368,7 +369,7 @@ EXTERNAL RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 	 * ignore Lun.
 	 *
 	 * Tag - the tag for the information requested example: TAG_IFD_ATR -
-	 * return the Atr and it's size (required). these tags are defined in
+	 * return the Atr and its size (required). these tags are defined in
 	 * ifdhandler.h
 	 *
 	 * Length - the length of the returned data Value - the value of the
@@ -469,8 +470,15 @@ EXTERNAL RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 					 * multi-slot reader */
 					int readerID =  get_ccid_descriptor(reader_index) -> readerID;
 
-					if ((GEMALTOPROXDU == readerID) || (GEMALTOPROXSU == readerID))
+					/* 2 CCID interfaces */
+					if ((GEMALTOPROXDU == readerID)
+						|| (GEMALTOPROXSU == readerID)
+						|| (HID_OMNIKEY_5422 == readerID))
 						*Value = 2;
+
+					/* 3 CCID interfaces */
+					if (FEITIANR502DUAL == readerID)
+						*Value = 3;
 				}
 #endif
 				DEBUG_INFO2("Reader supports %d slot(s)", *Value);
@@ -503,7 +511,7 @@ EXTERNAL RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 			break;
 
 #ifndef UEFI_DRIVER
-		case SCARD_ATTR_VENDOR_NAME:
+			case SCARD_ATTR_VENDOR_NAME:
 			{
 				const char *sIFD_iManufacturer = get_ccid_descriptor(reader_index) -> sIFD_iManufacturer;
 
@@ -521,14 +529,14 @@ EXTERNAL RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 			break;
 #endif
 
-		case SCARD_ATTR_MAXINPUT:
-			*Length = sizeof(uint32_t);
-			if (Value)
-				*(uint32_t *)Value = get_ccid_descriptor(reader_index) -> dwMaxCCIDMessageLength -10;
-			break;
+			case SCARD_ATTR_MAXINPUT:
+				*Length = sizeof(uint32_t);
+				if (Value)
+					*(uint32_t *)Value = get_ccid_descriptor(reader_index)->dwMaxCCIDMessageLength - 10;
+				break;
 
 #if !defined(TWIN_SERIAL) && !defined(UEFI_DRIVER)
-		case TAG_IFD_POLLING_THREAD_WITH_TIMEOUT:
+			case TAG_IFD_POLLING_THREAD_WITH_TIMEOUT:
 			{
 				_ccid_descriptor *ccid_desc;
 
@@ -597,7 +605,8 @@ EXTERNAL RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 #endif
 
 #ifndef UEFI_DRIVER
-		case SCARD_ATTR_VENDOR_IFD_SERIAL_NO:
+
+			case SCARD_ATTR_VENDOR_IFD_SERIAL_NO:
 			{
 				_ccid_descriptor *ccid_desc;
 
@@ -605,12 +614,25 @@ EXTERNAL RESPONSECODE IFDHGetCapabilities(DWORD Lun, DWORD Tag,
 				if (ccid_desc->sIFD_serial_number)
 				{
 					strlcpy((char *)Value, ccid_desc->sIFD_serial_number, *Length);
-					*Length = strlen((char *)Value);
+					*Length = strlen((char *)Value)+1;
 				}
 				else
 				{
 					/* not supported */
 					*Length = 0;
+				}
+			}
+			break;
+#endif
+
+#if !defined(TWIN_SERIAL) && !defined(UEFI_DRIVER)
+			case SCARD_ATTR_CHANNEL_ID:
+			{
+				*Length = sizeof(uint32_t);
+				if (Value) {
+					uint32_t bus  = get_ccid_usb_bus_number(reader_index);
+					uint32_t addr = get_ccid_usb_device_address(reader_index);
+					*(uint32_t *)Value = ((uint32_t)0x0020 << 16) | bus << 8 | addr;
 				}
 			}
 			break;
@@ -719,9 +741,6 @@ EXTERNAL RESPONSECODE IFDHSetProtocolParameters(DWORD Lun, DWORD Protocol,
 		ccid_slot->nATRLength);
 	if (ATR_MALFORMED == atr_ret)
 		return IFD_PROTOCOL_NOT_SUPPORTED;
-
-	/* Apply Extra EGT patch for bogus cards */
-	extra_egt(&atr, ccid_desc, Protocol);
 
 	if (SCARD_PROTOCOL_T0 == Protocol)
 		pps[1] |= ATR_PROTOCOL_TYPE_T0;
@@ -841,9 +860,7 @@ EXTERNAL RESPONSECODE IFDHSetProtocolParameters(DWORD Lun, DWORD Protocol,
 				/* the card is too fast for the reader */
 				if ((card_baudrate > ccid_desc->dwMaxDataRate +2)
 					/* but TA1 <= 97 */
-					&& (atr.ib[0][ATR_INTERFACE_BYTE_TA].value <= 0x97)
-					/* and the reader has a baud rate table */
-					&& ccid_desc->arrayOfSupportedDataRates)
+					&& (atr.ib[0][ATR_INTERFACE_BYTE_TA].value <= 0x97))
 				{
 					unsigned char old_TA1;
 
@@ -860,8 +877,15 @@ EXTERNAL RESPONSECODE IFDHSetProtocolParameters(DWORD Lun, DWORD Protocol,
 						card_baudrate = (unsigned int) (1000 *
 							ccid_desc->dwDefaultClock * d / f);
 
-						if (find_baud_rate(card_baudrate,
+						/* the reader has a baud rate table */
+						if ((ccid_desc->arrayOfSupportedDataRates
+							/* and the baud rate is supported */
+							&& find_baud_rate(card_baudrate,
 							ccid_desc->arrayOfSupportedDataRates))
+							/* or the reader has NO baud rate table */
+							|| ((NULL == ccid_desc->arrayOfSupportedDataRates)
+							/* and the baud rate is bellow the limit */
+							&& (card_baudrate <= ccid_desc->dwMaxDataRate)))
 						{
 							pps[1] |= 0x10; /* PTS1 presence */
 							pps[2] = atr.ib[0][ATR_INTERFACE_BYTE_TA].value;
@@ -1080,7 +1104,7 @@ EXTERNAL RESPONSECODE IFDHSetProtocolParameters(DWORD Lun, DWORD Protocol,
 		/* IFSD not negociated by the reader? */
 		if (! (ccid_desc->dwFeatures & CCID_CLASS_AUTO_IFSD))
 		{
-			DEBUG_COMM2("Negociate IFSD at %d", ccid_desc -> dwMaxIFSD);
+			DEBUG_COMM2("Negotiate IFSD at %d", ccid_desc -> dwMaxIFSD);
 			if (t1_negotiate_ifsd(t1, 0, ccid_desc -> dwMaxIFSD) < 0)
 				return IFD_COMMUNICATION_ERROR;
 		}
@@ -1107,7 +1131,7 @@ EXTERNAL RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 	 * Action - Action to be taken on the card.
 	 *
 	 * IFD_POWER_UP - Power and reset the card if not done so (store the
-	 * ATR and return it and it's length).
+	 * ATR and return it and its length).
 	 *
 	 * IFD_POWER_DOWN - Power down the card if not done already
 	 * (Atr/AtrLength should be zero'd)
@@ -1117,7 +1141,7 @@ EXTERNAL RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 	 *
 	 * Atr - Answer to Reset of the card.  The driver is responsible for
 	 * caching this value in case IFDHGetCapabilities is called requesting
-	 * the ATR and it's length.  This should not exceed MAX_ATR_SIZE.
+	 * the ATR and its length.  This should not exceed MAX_ATR_SIZE.
 	 *
 	 * AtrLength - Length of the Atr.  This should not exceed
 	 * MAX_ATR_SIZE.
@@ -1157,7 +1181,7 @@ EXTERNAL RESPONSECODE IFDHPowerICC(DWORD Lun, DWORD Action,
 #else
 	DEBUG_INFO4("action: %s, %s (lun: " DWORD_X ")", actions[Action - IFD_POWER_UP], CcidSlots[reader_index].readerName, Lun);
 #endif
-		
+
 	switch (Action)
 	{
 		case IFD_POWER_DOWN:
@@ -1293,18 +1317,23 @@ EXTERNAL RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 	RESPONSECODE return_value;
 	unsigned int rx_length;
 	int reader_index;
+	int old_read_timeout = 0;
+	int restore_timeout = FALSE;
+	_ccid_descriptor *ccid_descriptor;
 
 	(void)RecvPci;
 
 	if (-1 == (reader_index = LunToReaderIndex(Lun)))
 		return IFD_COMMUNICATION_ERROR;
 
+	ccid_descriptor = get_ccid_descriptor(reader_index);
+
 	DEBUG_INFO3("%s (lun: " DWORD_X ")", CcidSlots[reader_index].readerName,
 		Lun);
 
 #ifndef UEFI_DRIVER
 	/* special APDU for the Kobil IDToken (CLASS = 0xFF) */
-	if (KOBIL_IDTOKEN == get_ccid_descriptor(reader_index) -> readerID)
+	if (KOBIL_IDTOKEN == ccid_descriptor -> readerID)
 	{
 		char manufacturer[] = {0xFF, 0x9A, 0x01, 0x01, 0x00};
 		char product_name[] = {0xFF, 0x9A, 0x01, 0x03, 0x00};
@@ -1332,7 +1361,7 @@ EXTERNAL RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 		if ((sizeof firmware_version == TxLength)
 			&& (memcmp(TxBuffer, firmware_version, sizeof firmware_version) == 0))
 		{
-			int IFD_bcdDevice = get_ccid_descriptor(reader_index)->IFD_bcdDevice;
+			int IFD_bcdDevice = ccid_descriptor -> IFD_bcdDevice;
 
 			DEBUG_INFO1("IDToken: Firmware version command");
 			*RxLength = sprintf((char *)RxBuffer, "%X.%02X",
@@ -1355,6 +1384,16 @@ EXTERNAL RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 	}
 #endif
 
+	/* Pseudo-APDU as defined in PC/SC v2 part 10 supplement document
+	 * CLA=0xFF, INS=0xC2, P1=0x01 */
+	if (0 == memcmp(TxBuffer, "\xFF\xC2\x01", 3))
+	{
+		/* Yes, use the same timeout as for SCardControl() */
+		restore_timeout = TRUE;
+		old_read_timeout = ccid_descriptor -> readTimeout;
+		ccid_descriptor -> readTimeout = 90 * 1000;	/* 90 seconds */
+	}
+
 	rx_length = *RxLength;
 	return_value = CmdXfrBlock(reader_index, TxLength, TxBuffer, &rx_length,
 		RxBuffer, SendPci.Protocol);
@@ -1362,6 +1401,10 @@ EXTERNAL RESPONSECODE IFDHTransmitToICC(DWORD Lun, SCARD_IO_HEADER SendPci,
 		*RxLength = rx_length;
 	else
 		*RxLength = 0;
+
+	/* restore timeout */
+	if (restore_timeout)
+		ccid_descriptor -> readTimeout = old_read_timeout;
 
 	return return_value;
 } /* IFDHTransmitToICC */
@@ -1455,7 +1498,7 @@ EXTERNAL RESPONSECODE IFDHControl(DWORD Lun, DWORD dwControlCode,
 		PCSC_TLV_STRUCTURE *pcsc_tlv = (PCSC_TLV_STRUCTURE *)RxBuffer;
 		int readerID = ccid_descriptor -> readerID;
 
-		/* we need room for up to five records */
+		/* we need room for up to six records */
 		if (RxLength < 6 * sizeof(PCSC_TLV_STRUCTURE))
 			return IFD_ERROR_INSUFFICIENT_BUFFER;
 
@@ -1464,7 +1507,8 @@ EXTERNAL RESPONSECODE IFDHControl(DWORD Lun, DWORD dwControlCode,
 		{
 			pcsc_tlv -> tag = FEATURE_VERIFY_PIN_DIRECT;
 			pcsc_tlv -> length = 0x04; /* always 0x04 */
-			pcsc_tlv -> value = htonl(IOCTL_FEATURE_VERIFY_PIN_DIRECT);
+			set_U32(&pcsc_tlv -> value,
+			    htonl(IOCTL_FEATURE_VERIFY_PIN_DIRECT));
 
 			pcsc_tlv++;
 			iBytesReturned += sizeof(PCSC_TLV_STRUCTURE);
@@ -1474,7 +1518,8 @@ EXTERNAL RESPONSECODE IFDHControl(DWORD Lun, DWORD dwControlCode,
 		{
 			pcsc_tlv -> tag = FEATURE_MODIFY_PIN_DIRECT;
 			pcsc_tlv -> length = 0x04; /* always 0x04 */
-			pcsc_tlv -> value = htonl(IOCTL_FEATURE_MODIFY_PIN_DIRECT);
+			set_U32(&pcsc_tlv -> value,
+			    htonl(IOCTL_FEATURE_MODIFY_PIN_DIRECT));
 
 			pcsc_tlv++;
 			iBytesReturned += sizeof(PCSC_TLV_STRUCTURE);
@@ -1485,7 +1530,8 @@ EXTERNAL RESPONSECODE IFDHControl(DWORD Lun, DWORD dwControlCode,
 		{
 			pcsc_tlv -> tag = FEATURE_IFD_PIN_PROPERTIES;
 			pcsc_tlv -> length = 0x04; /* always 0x04 */
-			pcsc_tlv -> value = htonl(IOCTL_FEATURE_IFD_PIN_PROPERTIES);
+			set_U32(&pcsc_tlv -> value,
+			    htonl(IOCTL_FEATURE_IFD_PIN_PROPERTIES));
 
 			pcsc_tlv++;
 			iBytesReturned += sizeof(PCSC_TLV_STRUCTURE);
@@ -1496,7 +1542,8 @@ EXTERNAL RESPONSECODE IFDHControl(DWORD Lun, DWORD dwControlCode,
 		{
 			pcsc_tlv -> tag = FEATURE_MCT_READER_DIRECT;
 			pcsc_tlv -> length = 0x04; /* always 0x04 */
-			pcsc_tlv -> value = htonl(IOCTL_FEATURE_MCT_READER_DIRECT);
+			set_U32(&pcsc_tlv -> value,
+			    htonl(IOCTL_FEATURE_MCT_READER_DIRECT));
 
 			pcsc_tlv++;
 			iBytesReturned += sizeof(PCSC_TLV_STRUCTURE);
@@ -1504,7 +1551,8 @@ EXTERNAL RESPONSECODE IFDHControl(DWORD Lun, DWORD dwControlCode,
 
 		pcsc_tlv -> tag = FEATURE_GET_TLV_PROPERTIES;
 		pcsc_tlv -> length = 0x04; /* always 0x04 */
-		pcsc_tlv -> value = htonl(IOCTL_FEATURE_GET_TLV_PROPERTIES);
+		set_U32(&pcsc_tlv -> value,
+		    htonl(IOCTL_FEATURE_GET_TLV_PROPERTIES));
 		pcsc_tlv++;
 		iBytesReturned += sizeof(PCSC_TLV_STRUCTURE);
 
@@ -1513,7 +1561,8 @@ EXTERNAL RESPONSECODE IFDHControl(DWORD Lun, DWORD dwControlCode,
 		{
 			pcsc_tlv -> tag = FEATURE_CCID_ESC_COMMAND;
 			pcsc_tlv -> length = 0x04; /* always 0x04 */
-			pcsc_tlv -> value = htonl(IOCTL_SMARTCARD_VENDOR_IFD_EXCHANGE);
+			set_U32(&pcsc_tlv -> value,
+			    htonl(IOCTL_SMARTCARD_VENDOR_IFD_EXCHANGE));
 
 			pcsc_tlv++;
 			iBytesReturned += sizeof(PCSC_TLV_STRUCTURE);
@@ -1533,7 +1582,7 @@ EXTERNAL RESPONSECODE IFDHControl(DWORD Lun, DWORD dwControlCode,
 			return IFD_ERROR_INSUFFICIENT_BUFFER;
 
 		/* Only give the LCD size for now */
-		caps -> wLcdLayout = ccid_descriptor -> wLcdLayout;
+		set_U16(&caps -> wLcdLayout, ccid_descriptor -> wLcdLayout);
 
 		/* Hardcoded special reader cases */
 		switch (ccid_descriptor->readerID)
@@ -1654,6 +1703,34 @@ EXTERNAL RESPONSECODE IFDHControl(DWORD Lun, DWORD dwControlCode,
 			RxBuffer[p++] = PCSCv2_PART10_PROPERTY_bEntryValidationCondition;
 			RxBuffer[p++] = 1;	/* length */
 			RxBuffer[p++] = 0x02;	/* validation key pressed */
+		}
+
+		/* Cherry KC 1000 SC */
+		if (CHERRY_KC1000SC == ccid_descriptor -> readerID)
+		{
+			/* bMinPINSize */
+			RxBuffer[p++] = PCSCv2_PART10_PROPERTY_bMinPINSize;
+			RxBuffer[p++] = 1;	/* length */
+			RxBuffer[p++] = 0;	/* min PIN size */
+
+			/* bMaxPINSize */
+			RxBuffer[p++] = PCSCv2_PART10_PROPERTY_bMaxPINSize;
+			RxBuffer[p++] = 1;	/* length */
+			RxBuffer[p++] = 32;	/* max PIN size */
+		}
+
+		/* Omnikey 3821 */
+		if (HID_OMNIKEY_3821 == ccid_descriptor -> readerID)
+		{
+			/* bMinPINSize */
+			RxBuffer[p++] = PCSCv2_PART10_PROPERTY_bMinPINSize;
+			RxBuffer[p++] = 1;	/* length */
+			RxBuffer[p++] = 1;	/* min PIN size */
+
+			/* bMaxPINSize */
+			RxBuffer[p++] = PCSCv2_PART10_PROPERTY_bMaxPINSize;
+			RxBuffer[p++] = 1;	/* length */
+			RxBuffer[p++] = 31;	/* max PIN size */
 		}
 
 		/* Gemalto readers providing firmware features */
@@ -2009,94 +2086,17 @@ void init_driver(void)
 		case 3:
 			PowerOnVoltage = VOLTAGE_AUTO;
 			break;
-	}
+		}
 #else
-	/* full debug */
-	LogLevel = DEBUG_LEVEL_CRITICAL | DEBUG_LEVEL_INFO | DEBUG_LEVEL_PERIODIC | DEBUG_LEVEL_COMM;
+			/* full debug */
+			LogLevel = DEBUG_LEVEL_CRITICAL | DEBUG_LEVEL_INFO | DEBUG_LEVEL_PERIODIC | DEBUG_LEVEL_COMM;
 #endif
 
-	/* initialise the Lun to reader_index mapping */
-	InitReaderIndex();
+		/* initialise the Lun to reader_index mapping */
+		InitReaderIndex();
 
-	DebugInitialized = TRUE;
+		DebugInitialized = TRUE;
 } /* init_driver */
-
-
-void extra_egt(ATR_t *atr, _ccid_descriptor *ccid_desc, DWORD Protocol)
-{
-	/* This function use an EGT value for cards who comply with followings
-	 * criterias:
-	 * - TA1 > 11
-	 * - current EGT = 0x00 or 0xFF
-	 * - T=0 or (T=1 and CWI >= 2)
-	 *
-	 * Without this larger EGT some non ISO 7816-3 smart cards may not
-	 * communicate with the reader.
-	 *
-	 * This modification is harmless, the reader will just be less restrictive
-	 */
-
-	unsigned int card_baudrate;
-	unsigned int default_baudrate;
-	double f, d;
-
-	/* if TA1 not present */
-	if (! atr->ib[0][ATR_INTERFACE_BYTE_TA].present)
-		return;
-
-	(void)ATR_GetParameter(atr, ATR_PARAMETER_D, &d);
-	(void)ATR_GetParameter(atr, ATR_PARAMETER_F, &f);
-
-	/* may happen with non ISO cards */
-	if ((0 == f) || (0 == d))
-		return;
-
-	/* Baudrate = f x D/F */
-	card_baudrate = (unsigned int) (1000 * ccid_desc->dwDefaultClock * d / f);
-
-	default_baudrate = (unsigned int) (1000 * ccid_desc->dwDefaultClock
-		* ATR_DEFAULT_D / ATR_DEFAULT_F);
-
-	/* TA1 > 11? */
-	if (card_baudrate <= default_baudrate)
-		return;
-
-	/* Current EGT = 0 or FF? */
-	if (atr->ib[0][ATR_INTERFACE_BYTE_TC].present &&
-		((0x00 == atr->ib[0][ATR_INTERFACE_BYTE_TC].value) ||
-		(0xFF == atr->ib[0][ATR_INTERFACE_BYTE_TC].value)))
-	{
-		if (SCARD_PROTOCOL_T0 == Protocol)
-		{
-			/* Init TC1 */
-			atr->ib[0][ATR_INTERFACE_BYTE_TC].present = TRUE;
-			atr->ib[0][ATR_INTERFACE_BYTE_TC].value = 2;
-			DEBUG_INFO1("Extra EGT patch applied");
-		}
-
-		if (SCARD_PROTOCOL_T1 == Protocol)
-		{
-			int i;
-
-			/* TBi (i>2) present? BWI/CWI */
-			for (i=2; i<ATR_MAX_PROTOCOLS; i++)
-			{
-				/* CWI >= 2 ? */
-				if (atr->ib[i][ATR_INTERFACE_BYTE_TB].present &&
-					((atr->ib[i][ATR_INTERFACE_BYTE_TB].value & 0x0F) >= 2))
-				{
-					/* Init TC1 */
-					atr->ib[0][ATR_INTERFACE_BYTE_TC].present = TRUE;
-					atr->ib[0][ATR_INTERFACE_BYTE_TC].value = 2;
-					DEBUG_INFO1("Extra EGT patch applied");
-
-					/* only the first TBi (i>2) must be used */
-					break;
-				}
-			}
-		}
-	}
-} /* extra_egt */
 
 
 static char find_baud_rate(unsigned int baudrate, unsigned int *list)

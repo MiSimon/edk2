@@ -16,18 +16,24 @@
 	along with this library; if not, write to the Free Software Foundation,
 	Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
-
-/*
- * $Id: utils.h 4973 2010-06-01 09:43:29Z rousseau $
- */
+#include <Uefi.h>
 
 #ifndef TRUE
 #define FALSE 0
 #define TRUE 1
 #endif
 
+typedef UINT16 uint16_t;
+typedef UINT32 uint32_t;
+
 void InitReaderIndex(void);
 int GetNewReaderIndex(const int Lun);
-int LunToReaderIndex(const int Lun);
+int LunToReaderIndex(int Lun);
 void ReleaseReaderIndex(const int idx);
 
+uint16_t get_U16(void *);
+uint32_t get_U32(void *);
+void set_U16(void *, uint16_t);
+void set_U32(void *, uint32_t);
+void p_bswap_16(void *ptr);
+void p_bswap_32(void *ptr);

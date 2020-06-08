@@ -255,7 +255,7 @@ whichever location your reader resides.
 #ifndef _ifd_handler_h_
 #define _ifd_handler_h_
 
-#include <wintypes.h>
+#include "wintypes.h"
 #define MAX_ATR_SIZE 33 /* from pcsclite.h */
 
 	/*
