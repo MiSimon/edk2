@@ -34,6 +34,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 **/
 
+#include <Uefi.h>
 #include <Library/PrintLib.h>
 #include <Protocol/SmartCardReader.h>
 
@@ -74,7 +75,7 @@ EFI_DRIVER_BINDING_PROTOCOL gSmartCardReaderDriverBinding = {
 **/
 EFI_STATUS
 EFIAPI
-SmartCardReaderUnload (
+ImageUnloadHandler (
   IN EFI_HANDLE  ImageHandle
   )
 {
@@ -151,7 +152,7 @@ SmartCardReaderUnload (
 **/
 EFI_STATUS
 EFIAPI
-SmartCardReaderDriverEntryPoint (
+DriverEntry (
   IN EFI_HANDLE        ImageHandle,
   IN EFI_SYSTEM_TABLE  *SystemTable
   )

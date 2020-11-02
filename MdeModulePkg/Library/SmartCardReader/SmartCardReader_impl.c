@@ -35,7 +35,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "utils.h"
 #include "commands.h"
 #include "ccid.h"
-#include "atr.h"
+#include "libccid\towitoko\atr.h"
 #include "defs.h"
 
 #define CheckThis if (NULL == This) return EFI_INVALID_PARAMETER

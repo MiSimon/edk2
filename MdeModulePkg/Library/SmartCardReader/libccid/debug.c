@@ -157,10 +157,10 @@ void log_msg(const int priority, const char *fmt, ...)
 #endif
 } /* log_msg */
 
+#if 0
 void log_xxd(const int priority, const char *msg, const unsigned char *buffer,
 	const int len)
 {
-	#if 0
 	int i;
 	char *c, debug_buffer[len*3 + strlen(msg) +1];
 	size_t l;
@@ -183,5 +183,5 @@ void log_xxd(const int priority, const char *msg, const unsigned char *buffer,
 	(void)fprintf(LOG_STREAM, "%s\n", debug_buffer);
 	fflush(LOG_STREAM);
 #endif
-#endif
 } /* log_xxd */
+#endif

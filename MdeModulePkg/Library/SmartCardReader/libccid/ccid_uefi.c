@@ -21,6 +21,7 @@
  * $Id: ccid_usb.c 6890 2014-04-24 13:51:03Z rousseau $
  */
 
+#include <Uefi.h>
 #include <Protocol/UsbIo.h>
 #include <Library/UefiLib.h>
 #include <CcidDriver.h>

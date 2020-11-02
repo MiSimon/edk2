@@ -30,7 +30,7 @@ ct_buf_set(ct_buf_t *bp, void *mem, size_t len)
 int
 ct_buf_get(ct_buf_t *bp, void *mem, size_t len)
 {
-	if (len > bp->tail - bp->head)
+	if (len > (long)(bp->tail - bp->head))
 		return -1;
 	if (mem)
 		memcpy(mem, bp->base + bp->head, len);
@@ -41,7 +41,7 @@ ct_buf_get(ct_buf_t *bp, void *mem, size_t len)
 int
 ct_buf_put(ct_buf_t *bp, const void *mem, size_t len)
 {
-	if (len > bp->size - bp->tail) {
+	if (len > (long)(bp->size - bp->tail)) {
 		bp->overrun = 1;
 		return -1;
 	}
